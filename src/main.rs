@@ -120,10 +120,22 @@ fn main() -> Result<(), ()> {
         let use_verbose: bool = arguments.verbose;
         let mask_passwords: bool = arguments.mask_passwords;
 
-        let db_a = kdbx_to_group(file_a, pass_a, keyfile_a, use_verbose, mask_passwords)
-            .expect("Error opening database A");
-        let db_b = kdbx_to_group(file_b, pass_b, keyfile_b, use_verbose, mask_passwords)
-            .expect("Error opening database B");
+        let db_a = kdbx_to_group(
+            file_a,
+            pass_a.as_deref(),
+            keyfile_a.as_deref(),
+            use_verbose,
+            mask_passwords,
+        )
+        .expect("Error opening database A");
+        let db_b = kdbx_to_group(
+            file_b,
+            pass_b.as_deref(),
+            keyfile_b.as_deref(),
+            use_verbose,
+            mask_passwords,
+        )
+        .expect("Error opening database B");
 
         let delta = db_a.diff(&db_b);
 
@@ -156,8 +168,8 @@ fn prompt_password(prompt: &str) -> Option<Str> {
 
 pub fn kdbx_to_group(
     file: &str,
-    password: Option<Str>,
-    keyfile_path: Option<Str>,
+    password: Option<&str>,
+    keyfile_path: Option<&str>,
     use_verbose: bool,
     mask_passwords: bool,
 ) -> Result<Group, DatabaseOpenError> {
@@ -167,8 +179,8 @@ pub fn kdbx_to_group(
 }
 
 fn get_database_key(
-    password: Option<Str>,
-    keyfile_path: Option<Str>,
+    password: Option<&str>,
+    keyfile_path: Option<&str>,
 ) -> Result<DatabaseKey, std::io::Error> {
     let db_key = DatabaseKey::new();
     let db_key = match password {
@@ -176,7 +188,7 @@ fn get_database_key(
         _ => db_key,
     };
     if let Some(path) = keyfile_path {
-        db_key.with_keyfile(&mut File::open(path.as_ref())?)
+        db_key.with_keyfile(&mut File::open(path)?)
     } else {
         Ok(db_key)
     }

@@ -15,16 +15,18 @@ use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 use std::fs::File;
 
+type Str = Box<str>;
+
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
     /// Sets the first file
     #[clap(name = "INPUT-A", index = 1)]
-    input_a: String,
+    input_a: Str,
 
     /// Sets the second file
     #[clap(name = "INPUT-B", index = 2)]
-    input_b: String,
+    input_b: Str,
 
     /// Disables color output
     #[clap(short = 'C', long = "no-color")]
@@ -40,15 +42,15 @@ struct Args {
 
     /// Sets the password for the first file (will be asked for if omitted)
     #[clap(name = "password-a", long)]
-    password_a: Option<String>,
+    password_a: Option<Str>,
 
     /// Sets the password for the second file (will be asked for if omitted)
     #[clap(name = "password-b", long)]
-    password_b: Option<String>,
+    password_b: Option<Str>,
 
     /// Sets the password for both files (if it's the same for both files)
     #[clap(name = "passwords", long)]
-    passwords: Option<String>,
+    passwords: Option<Str>,
 
     /// Asks for password only once, and tries to open both files with it
     #[clap(name = "same-password", long)]
@@ -68,15 +70,15 @@ struct Args {
 
     /// Sets the key file for the first file
     #[clap(name = "keyfile-a", long)]
-    keyfile_a: Option<String>,
+    keyfile_a: Option<Str>,
 
     /// Sets the key file for the second file
     #[clap(name = "keyfile-b", long)]
-    keyfile_b: Option<String>,
+    keyfile_b: Option<Str>,
 
     /// Sets the same key file for both files (keyfile-a and keyfile-b would take precedence if set as well)
     #[clap(name = "keyfiles", long)]
-    keyfiles: Option<String>,
+    keyfiles: Option<Str>,
 }
 
 fn main() -> Result<(), ()> {
@@ -112,8 +114,8 @@ fn main() -> Result<(), ()> {
             (_, _, _, _, true) => None,
             _ => prompt_password(format!("Password for file {}: ", file_b).as_str()),
         };
-        let keyfile_a: Option<String> = arguments.keyfile_a.or(arguments.keyfiles.clone());
-        let keyfile_b: Option<String> = arguments.keyfile_b.or(arguments.keyfiles.clone());
+        let keyfile_a: Option<Str> = arguments.keyfile_a.or(arguments.keyfiles.clone());
+        let keyfile_b: Option<Str> = arguments.keyfile_b.or(arguments.keyfiles.clone());
         let use_color: bool = !arguments.no_color;
         let use_verbose: bool = arguments.verbose;
         let mask_passwords: bool = arguments.mask_passwords;
@@ -140,16 +142,22 @@ fn main() -> Result<(), ()> {
     Ok(())
 }
 
-fn prompt_password(prompt: &str) -> Option<String> {
+fn prompt_password(prompt: &str) -> Option<Str> {
     rpassword::prompt_password(prompt)
-        .map(|s| if s.is_empty() { None } else { Some(s) })
+        .map(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.into_boxed_str())
+            }
+        })
         .unwrap_or(None)
 }
 
 pub fn kdbx_to_group(
     file: &str,
-    password: Option<String>,
-    keyfile_path: Option<String>,
+    password: Option<Str>,
+    keyfile_path: Option<Str>,
     use_verbose: bool,
     mask_passwords: bool,
 ) -> Result<Group, DatabaseOpenError> {
@@ -159,16 +167,16 @@ pub fn kdbx_to_group(
 }
 
 fn get_database_key(
-    password: Option<String>,
-    keyfile_path: Option<String>,
+    password: Option<Str>,
+    keyfile_path: Option<Str>,
 ) -> Result<DatabaseKey, std::io::Error> {
     let db_key = DatabaseKey::new();
     let db_key = match password {
-        Some(pwd) => db_key.with_password(pwd.as_str()),
+        Some(pwd) => db_key.with_password(&pwd),
         _ => db_key,
     };
     if let Some(path) = keyfile_path {
-        db_key.with_keyfile(&mut File::open(path)?)
+        db_key.with_keyfile(&mut File::open(path.as_ref())?)
     } else {
         Ok(db_key)
     }

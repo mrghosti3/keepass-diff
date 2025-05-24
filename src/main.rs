@@ -15,16 +15,18 @@ use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 use std::fs::File;
 
+type Str = Box<str>;
+
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
     /// Sets the first file
     #[clap(name = "INPUT-A", index = 1)]
-    input_a: String,
+    input_a: Str,
 
     /// Sets the second file
     #[clap(name = "INPUT-B", index = 2)]
-    input_b: String,
+    input_b: Str,
 
     /// Disables color output
     #[clap(short = 'C', long = "no-color")]
@@ -40,15 +42,15 @@ struct Args {
 
     /// Sets the password for the first file (will be asked for if omitted)
     #[clap(name = "password-a", long)]
-    password_a: Option<String>,
+    password_a: Option<Str>,
 
     /// Sets the password for the second file (will be asked for if omitted)
     #[clap(name = "password-b", long)]
-    password_b: Option<String>,
+    password_b: Option<Str>,
 
     /// Sets the password for both files (if it's the same for both files)
     #[clap(name = "passwords", long, short)]
-    passwords: Option<String>,
+    passwords: Option<Str>,
 
     /// Asks for password only once, and tries to open both files with it
     #[clap(name = "same-password", long, short)]
@@ -68,15 +70,15 @@ struct Args {
 
     /// Sets the key file for the first file
     #[clap(name = "keyfile-a", long)]
-    keyfile_a: Option<String>,
+    keyfile_a: Option<Str>,
 
     /// Sets the key file for the second file
     #[clap(name = "keyfile-b", long)]
-    keyfile_b: Option<String>,
+    keyfile_b: Option<Str>,
 
     /// Sets the same key file for both files (keyfile-a and keyfile-b would take precedence if set as well)
     #[clap(name = "keyfiles", long)]
-    keyfiles: Option<String>,
+    keyfiles: Option<Str>,
 }
 
 fn main() -> Result<(), ()> {
@@ -93,10 +95,10 @@ fn main() -> Result<(), ()> {
         ) {
             (Some(password), _, _, _, _) => Some(password),
             (_, Some(password), _, _, _) => Some(password),
-            (_, _, true, _, _) => prompt_password("Password for both files: "),
+            (_, _, true, _, _) => prompt_password(None).map(Into::into),
             (_, _, _, true, _) => None,
             (_, _, _, _, true) => None,
-            _ => prompt_password(format!("Password for file {}: ", file_a).as_str()),
+            _ => prompt_password(Some(&file_a)).map(Into::into),
         };
         let pass_b = match (
             arguments.password_b,
@@ -110,18 +112,30 @@ fn main() -> Result<(), ()> {
             (_, _, true, _, _) => pass_a.clone(),
             (_, _, _, true, _) => None,
             (_, _, _, _, true) => None,
-            _ => prompt_password(format!("Password for file {}: ", file_b).as_str()),
+            _ => prompt_password(Some(&file_b)).map(Into::into),
         };
-        let keyfile_a: Option<String> = arguments.keyfile_a.or(arguments.keyfiles.clone());
-        let keyfile_b: Option<String> = arguments.keyfile_b.or(arguments.keyfiles.clone());
+        let keyfile_a: Option<Str> = arguments.keyfile_a.or(arguments.keyfiles.clone());
+        let keyfile_b: Option<Str> = arguments.keyfile_b.or(arguments.keyfiles.clone());
         let use_color: bool = !arguments.no_color;
         let use_verbose: bool = arguments.verbose;
         let mask_passwords: bool = arguments.mask_passwords;
 
-        let db_a = kdbx_to_group(file_a, pass_a, keyfile_a, use_verbose, mask_passwords)
-            .expect("Error opening database A");
-        let db_b = kdbx_to_group(file_b, pass_b, keyfile_b, use_verbose, mask_passwords)
-            .expect("Error opening database B");
+        let db_a = kdbx_to_group(
+            file_a,
+            pass_a.as_deref(),
+            keyfile_a.as_deref(),
+            use_verbose,
+            mask_passwords,
+        )
+        .expect("Error opening database A");
+        let db_b = kdbx_to_group(
+            file_b,
+            pass_b.as_deref(),
+            keyfile_b.as_deref(),
+            use_verbose,
+            mask_passwords,
+        )
+        .expect("Error opening database B");
 
         let delta = db_a.diff(&db_b);
 
@@ -140,16 +154,26 @@ fn main() -> Result<(), ()> {
     Ok(())
 }
 
-fn prompt_password(prompt: &str) -> Option<String> {
+fn prompt_password(file_name: Option<&str>) -> Option<String> {
+    let prompt = match file_name {
+        Some(fname) => format!("Password for file {}: ", fname),
+        None => "Password for both files: ".to_string(),
+    };
     rpassword::prompt_password(prompt)
-        .map(|s| if s.is_empty() { None } else { Some(s) })
+        .map(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        })
         .unwrap_or(None)
 }
 
 pub fn kdbx_to_group(
     file: &str,
-    password: Option<String>,
-    keyfile_path: Option<String>,
+    password: Option<&str>,
+    keyfile_path: Option<&str>,
     use_verbose: bool,
     mask_passwords: bool,
 ) -> Result<Group, DatabaseOpenError> {
@@ -159,12 +183,12 @@ pub fn kdbx_to_group(
 }
 
 fn get_database_key(
-    password: Option<String>,
-    keyfile_path: Option<String>,
+    password: Option<&str>,
+    keyfile_path: Option<&str>,
 ) -> Result<DatabaseKey, std::io::Error> {
     let db_key = DatabaseKey::new();
     let db_key = match password {
-        Some(pwd) => db_key.with_password(pwd.as_str()),
+        Some(pwd) => db_key.with_password(pwd),
         _ => db_key,
     };
     if let Some(path) = keyfile_path {

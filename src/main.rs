@@ -13,6 +13,7 @@ use keepass::{error::DatabaseOpenError, Database, DatabaseKey};
 
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
+use std::borrow::Cow;
 use std::fs::File;
 
 type Str = Box<str>;
@@ -83,73 +84,89 @@ struct Args {
 
 fn main() -> Result<(), ()> {
     let arguments = Args::parse();
+    let use_color = !arguments.no_color;
+    let use_verbose = arguments.verbose;
+    let mask_passwords = arguments.mask_passwords;
 
-    let (file_a, file_b) = (&arguments.input_a, &arguments.input_b);
-    {
-        let pass_a = match (
-            arguments.password_a,
-            arguments.passwords.clone(),
+    let (db_a, db_b) = {
+        let file_a = &arguments.input_a;
+        let file_b = &arguments.input_b;
+
+        let pass_a: Option<Cow<str>> = match (
+            arguments.password_a.as_deref(),
+            arguments.passwords.as_deref(),
             arguments.same_password,
             arguments.no_password_a,
             arguments.no_passwords,
         ) {
-            (Some(password), _, _, _, _) => Some(password),
-            (_, Some(password), _, _, _) => Some(password),
+            (Some(password), _, _, _, _) => Some(password.into()),
+            (_, Some(password), _, _, _) => Some(password.into()),
             (_, _, true, _, _) => prompt_password(None).map(Into::into),
             (_, _, _, true, _) => None,
             (_, _, _, _, true) => None,
-            _ => prompt_password(Some(&file_a)).map(Into::into),
+            _ => prompt_password(Some(file_a)).map(Into::into),
         };
-        let pass_b = match (
-            arguments.password_b,
-            arguments.passwords.clone(),
+        let pass_b: Option<Cow<str>> = match (
+            arguments.password_b.as_deref(),
+            arguments.passwords.as_deref(),
             arguments.same_password,
             arguments.no_password_b,
             arguments.no_passwords,
         ) {
-            (Some(password), _, _, _, _) => Some(password),
-            (_, Some(password), _, _, _) => Some(password),
+            (Some(password), _, _, _, _) => Some(password.into()),
+            (_, Some(password), _, _, _) => Some(password.into()),
             (_, _, true, _, _) => pass_a.clone(),
             (_, _, _, true, _) => None,
             (_, _, _, _, true) => None,
-            _ => prompt_password(Some(&file_b)).map(Into::into),
+            _ => prompt_password(Some(file_b)).map(Into::into),
         };
-        let keyfile_a: Option<Str> = arguments.keyfile_a.or(arguments.keyfiles.clone());
-        let keyfile_b: Option<Str> = arguments.keyfile_b.or(arguments.keyfiles.clone());
-        let use_color: bool = !arguments.no_color;
-        let use_verbose: bool = arguments.verbose;
-        let mask_passwords: bool = arguments.mask_passwords;
 
-        let db_a = kdbx_to_group(
-            file_a,
-            pass_a.as_deref(),
-            keyfile_a.as_deref(),
-            use_verbose,
-            mask_passwords,
-        )
-        .expect("Error opening database A");
-        let db_b = kdbx_to_group(
-            file_b,
-            pass_b.as_deref(),
-            keyfile_b.as_deref(),
-            use_verbose,
-            mask_passwords,
-        )
-        .expect("Error opening database B");
+        let keyfile_a = arguments.keyfile_a.as_deref();
+        let keyfile_b = arguments.keyfile_b.as_deref();
+        let keyfiles = arguments.keyfiles.as_deref();
 
-        let delta = db_a.diff(&db_b);
+        let keyfile_a = match (keyfile_a, keyfiles) {
+            (None, None) => None,
+            (Some(kfa), _) => Some(kfa),
+            (_, Some(kfs)) => Some(kfs),
+        };
+        let keyfile_b = match (keyfile_b, keyfiles) {
+            (None, None) => None,
+            (Some(kfb), _) => Some(kfb),
+            (_, Some(kfs)) => Some(kfs),
+        };
 
-        println!(
-            "{}",
-            DiffDisplay {
-                inner: delta,
-                path: stack::Stack::empty(),
-                use_color,
+        (
+            kdbx_to_group(
+                file_a,
+                pass_a.as_deref(),
+                keyfile_a,
                 use_verbose,
                 mask_passwords,
-            }
-        );
-    }
+            )
+            .expect("Error opening database A"),
+            kdbx_to_group(
+                file_b,
+                pass_b.as_deref(),
+                keyfile_b,
+                use_verbose,
+                mask_passwords,
+            )
+            .expect("Error opening database B"),
+        )
+    };
+
+    let delta = db_a.diff(&db_b);
+    println!(
+        "{}",
+        DiffDisplay {
+            inner: delta,
+            path: stack::Stack::empty(),
+            use_color,
+            use_verbose,
+            mask_passwords,
+        }
+    );
 
     Ok(())
 }
@@ -160,13 +177,7 @@ fn prompt_password(file_name: Option<&str>) -> Option<String> {
         None => "Password for both files: ".to_string(),
     };
     rpassword::prompt_password(prompt)
-        .map(|s| {
-            if s.is_empty() {
-                None
-            } else {
-                Some(s)
-            }
-        })
+        .map(|s| if s.is_empty() { None } else { Some(s) })
         .unwrap_or(None)
 }
 

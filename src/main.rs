@@ -143,17 +143,22 @@ fn main() -> Result<(), ()> {
                 keyfile_a,
                 use_verbose,
                 mask_passwords,
-            )
-            .expect("Error opening database A"),
+            ),
             kdbx_to_group(
                 file_b,
                 pass_b.as_deref(),
                 keyfile_b,
                 use_verbose,
                 mask_passwords,
-            )
-            .expect("Error opening database B"),
+            ),
         )
+    };
+
+    let (db_a, db_b) = match (db_a, db_b) {
+        (Ok(db_a), Ok(db_b)) => (db_a, db_b),
+        (Err(ref db), Ok(_)) => process_error(Some(db), None),
+        (Ok(_), Err(ref db)) => process_error(None, Some(db)),
+        (Err(ref db_a), Err(ref db_b)) => process_error(Some(db_a), Some(db_b)),
     };
 
     let delta = db_a.diff(&db_b);
@@ -169,6 +174,21 @@ fn main() -> Result<(), ()> {
     );
 
     Ok(())
+}
+
+fn process_error(db_a: Option<&DatabaseOpenError>, db_b: Option<&DatabaseOpenError>) -> ! {
+    use std::process::exit;
+
+    eprint!("keepass-diff: ");
+
+    match (db_a, db_b) {
+        (Some(_), None) => eprintln!("error opening database A"),
+        (None, Some(_)) => eprintln!("error opening database B"),
+        (Some(_), Some(_)) => eprintln!("error opening both databases"),
+        (None, None) => unreachable!(),
+    }
+
+    exit(1);
 }
 
 fn prompt_password(file_name: Option<&str>) -> Option<String> {
